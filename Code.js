@@ -365,7 +365,7 @@ function setAttendanceRequired(data) {
 
     const oldValue = target[3];
 
-    // Don't log a change if the value is already the same
+    // 
     if (oldValue === required) {
       return {
         success: true,
