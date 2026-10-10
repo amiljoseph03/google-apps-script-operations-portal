@@ -204,7 +204,7 @@ function addEmailToQueue(taskId, assignee) {
   const ss = getOperationsSpreadsheet();
   const sheet = ss.getSheetByName('EmailQueue');
 
-  const email = '   ';
+  const email = '';
 
   sheet.appendRow([
     new Date(),
@@ -215,6 +215,60 @@ function addEmailToQueue(taskId, assignee) {
     'Pending',
     '',
   ]);
+}
+
+
+// ---------------------------------------
+
+function processEmailQueue() {
+  const lock = LockService.getScriptLock();
+
+  try {
+    lock.waitLock(5000);
+
+    const ss = SpreadsheetApp.openById(
+      '1eKOh70td9eLf9UaoPC36mmb2H4rQDzEr1CqlvYI_xVE',
+    );
+    const sheet = ss.getSheetByName('EmailQueue');
+
+    const lastRow = sheet.getLastRow();
+
+    if (lastRow < 2) {
+      Logger.log('No emails in queue');
+      return;
+    }
+
+    const data = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
+
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+
+      const email = row[2];
+      const subject = row[3];
+      const message = row[4];
+      const status = row[5];
+
+      if (status !== 'Pending') {
+        continue;
+      }
+
+      const sheetRow = i + 2;
+
+      try {
+        MailApp.sendEmail(email, subject, message);
+
+        sheet.getRange(sheetRow, 6, 1, 2).setValues([['Sent', new Date()]]);
+      } catch (error) {
+        sheet.getRange(sheetRow, 6).setValue('Failed');
+
+        Logger.log(
+          `Failed to send email for row ${sheetRow}: ${error.message}`,
+        );
+      }
+    }
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 
