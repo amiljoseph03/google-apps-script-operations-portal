@@ -204,7 +204,7 @@ function addEmailToQueue(taskId, assignee) {
   const ss = getOperationsSpreadsheet();
   const sheet = ss.getSheetByName('EmailQueue');
 
-  const email = '...';
+  const email = '   ';
 
   sheet.appendRow([
     new Date(),
