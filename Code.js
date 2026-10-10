@@ -7,10 +7,44 @@ function doGet(e) {
   ).setMimeType(ContentService.MimeType.JSON);
 }
 
-function setupTestData() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet(
-    '1eKOh70td9eLf9UaoPC36mmb2H4rQDzEr1CqlvYI_xVE',
+// -----------post
+
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+
+    if (data.action === 'updateTask') {
+      return jsonResponse(updateTask(data));
+    }
+
+    return jsonResponse({
+      success: false,
+      message: 'Unknown action',
+    });
+  } catch (error) {
+    return jsonResponse({
+      success: false,
+      message: error.message,
+    });
+  }
+}
+
+// ...
+
+const SPREADSHEET_ID = '1eKOh70td9eLf9UaoPC36mmb2H4rQDzEr1CqlvYI_xVE';
+
+function getOperationsSpreadsheet() {
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
+}
+
+function jsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(
+    ContentService.MimeType.JSON,
   );
+}
+
+function setupTestData() {
+  const ss = getOperationsSpreadsheet();
 
   const tasksSheet = ss.getSheetByName('Tasks');
   const usersSheet = ss.getSheetByName('Users');
@@ -75,3 +109,112 @@ function setupTestData() {
 
   Logger.log('Test data created successfully');
 }
+
+// ------------------------------------------------------------ update
+
+function updateTask(data) {
+  const id = data.id;
+  const status = data.status;
+
+  if (!id || !status) {
+    return {
+      success: false,
+      message: 'id and status are required',
+    };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  try {
+    lock.waitLock(5000);
+
+    const cache = CacheService.getScriptCache();
+    const duplicateKey = `task_update_${id}_${status}`;
+
+    if (cache.get(duplicateKey)) {
+      return {
+        success: true,
+        duplicate: true,
+        message: 'Duplicate update ignored',
+      };
+    }
+
+    cache.put(duplicateKey, '1', 10);
+
+    const ss = getOperationsSpreadsheet();
+    const sheet = ss.getSheetByName('Tasks');
+
+    const idCell = sheet
+      .getRange('A:A')
+      .createTextFinder(id)
+      .matchEntireCell(true)
+      .findNext();
+
+    if (!idCell) {
+      return {
+        success: false,
+        message: 'Task not found',
+      };
+    }
+
+    const row = idCell.getRow();
+
+    const currentValues = sheet.getRange(row, 1, 1, 5).getValues()[0];
+
+    const oldStatus = currentValues[3];
+
+    let completedAt = currentValues[4];
+
+    if (status === 'Complete' && oldStatus !== 'Complete') {
+      completedAt = new Date();
+    }
+
+    if (status !== 'Complete') {
+      completedAt = '';
+    }
+
+    const newValues = [
+      currentValues[0],
+      currentValues[1],
+      currentValues[2],
+      status,
+      completedAt,
+    ];
+
+    sheet.getRange(row, 1, 1, 5).setValues([newValues]);
+
+    if (status === 'Complete' && oldStatus !== 'Complete') {
+      addEmailToQueue(id, currentValues[1]);
+    }
+
+    return {
+      success: true,
+      message: 'Task updated successfully',
+      id: id,
+      status: status,
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ----------------email////////
+
+function addEmailToQueue(taskId, assignee) {
+  const ss = getOperationsSpreadsheet();
+  const sheet = ss.getSheetByName('EmailQueue');
+
+  const email = '...';
+
+  sheet.appendRow([
+    new Date(),
+    taskId,
+    email,
+    `Task ${taskId} completed`,
+    `Task ${taskId} has been marked as Complete.`,
+    'Pending',
+    '',
+  ]);
+}
+
+
