@@ -17,6 +17,10 @@ function doPost(e) {
       return jsonResponse(updateTask(data));
     }
 
+    if (data.action === 'setAttendanceRequired') {
+      return jsonResponse(setAttendanceRequired(data));
+    }
+
     return jsonResponse({
       success: false,
       message: 'Unknown action',
@@ -28,6 +32,28 @@ function doPost(e) {
     });
   }
 }
+
+
+// ------ 
+// function doPost(e) {
+//   try {
+//     const data = JSON.parse(e.postData.contents);
+
+//     if (data.action === 'updateTask') {
+//       return jsonResponse(updateTask(data));
+//     }
+
+//     return jsonResponse({
+//       success: false,
+//       message: 'Unknown action',
+//     });
+//   } catch (error) {
+//     return jsonResponse({
+//       success: false,
+//       message: error.message,
+//     });
+//   }
+// }
 
 // ...
 
@@ -270,6 +296,100 @@ function processEmailQueue() {
     lock.releaseLock();
   }
 }
+// --------------- 
 
+function setAttendanceRequired(data) {
+  const actorId = data.actorId;
+  const targetId = data.targetId;
+  const required = data.required;
+
+  if (!actorId || !targetId || typeof required !== 'boolean') {
+    return {
+      success: false,
+      message: 'actorId, targetId and boolean required are required',
+    };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  try {
+    lock.waitLock(5000);
+
+    const ss = SpreadsheetApp.openById(
+      '1eKOh70td9eLf9UaoPC36mmb2H4rQDzEr1CqlvYI_xVE',
+    );
+
+    const usersSheet = ss.getSheetByName('Users');
+    const logSheet = ss.getSheetByName('SettingsLog');
+
+    // Find the actor without looping through all users
+    const actorCell = usersSheet
+      .getRange('A:A')
+      .createTextFinder(actorId)
+      .matchEntireCell(true)
+      .findNext();
+
+    if (!actorCell) {
+      return {
+        success: false,
+        message: 'Actor not found',
+      };
+    }
+
+    const actorRow = actorCell.getRow();
+    const actor = usersSheet.getRange(actorRow, 1, 1, 4).getValues()[0];
+
+    if (actor[2] !== 'admin') {
+      return {
+        success: false,
+        message: 'Access denied: admin only',
+      };
+    }
+
+    // Find the target user
+    const targetCell = usersSheet
+      .getRange('A:A')
+      .createTextFinder(targetId)
+      .matchEntireCell(true)
+      .findNext();
+
+    if (!targetCell) {
+      return {
+        success: false,
+        message: 'Target user not found',
+      };
+    }
+
+    const targetRow = targetCell.getRow();
+    const target = usersSheet.getRange(targetRow, 1, 1, 4).getValues()[0];
+
+    const oldValue = target[3];
+
+    // Don't log a change if the value is already the same
+    if (oldValue === required) {
+      return {
+        success: true,
+        message: 'Attendance setting is already set to this value',
+        changed: false,
+      };
+    }
+
+    // Update only the target user's attendanceRequired cell
+    usersSheet.getRange(targetRow, 4).setValue(required);
+
+    // Record the successful change
+    logSheet.appendRow([new Date(), actorId, targetId, oldValue, required]);
+
+    return {
+      success: true,
+      message: 'Attendance setting updated successfully',
+      targetId: targetId,
+      oldValue: oldValue,
+      newValue: required,
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
 
 
